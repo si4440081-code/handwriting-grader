@@ -1,0 +1,549 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>손글씨 채점 AI 시연</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;500;700&family=Nanum+Pen+Script&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+  :root {
+    --paper: #fcfdfe; --rule: #d9e4f1; --ink: #23324a; --muted: #66768c; --line: #c7d3e2;
+    --pen: #d7263d; --marker: #ffd84d; --marker-ink: #8a6a00; --ok: #2d5ba3;
+    --hand: "Nanum Pen Script", "Comic Sans MS", cursive;
+    --body: "IBM Plex Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-padding-top: 16px; }
+  body {
+    margin: 0; color: var(--ink); font: 16px/1.65 var(--body);
+    background: var(--paper) repeating-linear-gradient(transparent 0 31px, var(--rule) 31px 32px);
+  }
+  .sheet { max-width: 1040px; margin: 0 auto; padding: 28px 22px 80px; }
+
+  /* 시험지 머리글처럼 */
+  .exam-head { border: 2px solid var(--ink); border-radius: 22px; padding: 6px; background: #fff; }
+  .exam-head > div { border: 1.5px solid var(--ink); border-radius: 16px; padding: 18px 22px 14px;
+    display: grid; grid-template-columns: 1fr auto; gap: 12px 20px; align-items: center; }
+  .period { display: inline-block; border: 1.5px solid var(--ink); border-radius: 999px; padding: 2px 14px; font-weight: 700; font-size: 14px; }
+  .year { font-weight: 700; font-size: 14px; margin-left: 10px; }
+  h1 { margin: 6px 0 0; font-size: clamp(32px, 5vw, 48px); line-height: 1.15; letter-spacing: -0.5px; }
+  h1 .circled { position: relative; display: inline-block; padding: 0 6px; }
+  h1 .circled svg { position: absolute; left: -12%; top: -22%; width: 124%; height: 150%; overflow: visible; pointer-events: none; }
+  h1 .circled ellipse { fill: none; stroke: var(--pen); stroke-width: 3.2; stroke-linecap: round;
+    stroke-dasharray: 520; stroke-dashoffset: 520; animation: draw 1.1s .3s ease-out forwards; }
+  @keyframes draw { to { stroke-dashoffset: 0; } }
+  .scorebox { border: 1.5px solid var(--ink); width: 150px; text-align: center; align-self: stretch; display: flex; flex-direction: column; }
+  .scorebox b { border-bottom: 1.5px solid var(--ink); font-size: 14px; padding: 2px 0; }
+  .scorebox span { font: 40px/1 var(--hand); color: var(--pen); padding: 8px 4px 2px; }
+  .scorebox small { font-size: 12px; color: var(--muted); padding-bottom: 6px; }
+  .fields { grid-column: 1 / -1; border-top: 1.5px solid var(--ink); padding-top: 10px; font-size: 15px; display: flex; flex-wrap: wrap; gap: 4px 18px; }
+  .fields em { font: 26px/1 var(--hand); color: var(--ok); font-style: normal; padding: 0 6px; }
+  .notice { margin: 16px 0 6px; border: 1.5px solid var(--ink); border-radius: 12px; padding: 10px 16px; background: #fff; font-size: 14px; }
+  .notice p { margin: 2px 0; }
+  .server { font-size: 13px; color: var(--muted); margin: 6px 4px 0; }
+  .server.bad { color: var(--pen); }
+  #apiRow { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+
+  /* 문항처럼 번호 매긴 단계 */
+  .q { margin-top: 40px; }
+  .q > h2 { display: flex; gap: 14px; align-items: baseline; font-size: 21px; margin: 0 0 14px; }
+  .q > h2 .no { font-size: 24px; font-weight: 700; text-decoration: underline; text-underline-offset: 6px; text-decoration-thickness: 2px; }
+  .tabs { display: flex; gap: 10px; margin: 0 0 14px 38px; flex-wrap: wrap; }
+  .subjects { display: flex; gap: 10px; margin: 0 0 16px 38px; flex-wrap: wrap; }
+  .subjects button { font: 600 15px var(--body); background: #fff; border: 1.5px solid var(--ink); border-radius: 999px; padding: 4px 16px; cursor: pointer; color: var(--ink); }
+  .subjects button.on { background: var(--ink); color: #fff; }
+  .decide { display: flex; gap: 6px; flex-wrap: wrap; }
+  .decide button { font: 500 14px var(--body); border: 1.5px solid var(--ink); background: #fff; padding: 4px 10px; cursor: pointer; }
+  .decide button.ok { color: var(--ok); border-color: var(--ok); } .decide button.ng { color: var(--pen); border-color: var(--pen); }
+  .decide button:disabled { opacity: .5; cursor: wait; }
+  .decided { font: 26px/1 var(--hand); } .decided.correct { color: var(--ok); } .decided.wrong { color: var(--pen); }
+  .undo { font-size: 12px; color: var(--muted); background: none; border: 0; text-decoration: underline; cursor: pointer; padding: 0 0 0 6px; }
+  .rowdone td { background: #f6f9fd; }
+  .tabs button { font: inherit; background: none; border: 0; border-bottom: 2px solid transparent; padding: 4px 2px; cursor: pointer; color: var(--muted); }
+  .tabs button.on { color: var(--ink); border-color: var(--ink); font-weight: 700; }
+  .pane { margin-left: 38px; }
+  .hint { color: var(--muted); font-size: 14px; margin: 0 0 12px; }
+
+  .samples { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 22px 18px; }
+  .sample { position: relative; background: #fff; border: 1px solid var(--line); padding: 6px 6px 8px; cursor: pointer;
+    box-shadow: 0 1px 0 var(--line), 0 6px 14px -10px rgba(35, 50, 74, .45); transform: rotate(var(--tilt, 0deg)); }
+  .sample:focus-visible { outline: 3px solid var(--ok); outline-offset: 3px; }
+  .sample img { width: 100%; aspect-ratio: 3 / 4; object-fit: cover; object-position: top; display: block; filter: saturate(.85); }
+  .sample b { display: block; font-size: 13px; margin-top: 6px; }
+  .sample span { font-size: 12px; color: var(--muted); }
+  .sample .tick { position: absolute; right: -10px; top: -16px; font: 54px/1 var(--hand); color: var(--pen); display: none; }
+  .sample.on { border-color: var(--pen); }
+  .sample.on .tick { display: block; }
+
+  .actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 18px; }
+  .btn { font: 500 16px var(--body); background: var(--ink); color: #fff; border: 0; padding: 11px 20px; border-radius: 4px; cursor: pointer; }
+  .btn:hover { background: #33496b; }
+  .btn.plain { background: none; color: var(--ink); text-decoration: underline; text-underline-offset: 4px; padding: 11px 6px; }
+  .btn:disabled { opacity: .45; cursor: wait; }
+  .btn:focus-visible, .tabs button:focus-visible, input:focus-visible, summary:focus-visible { outline: 3px solid var(--ok); outline-offset: 2px; }
+  label.file { display: inline-flex; gap: 6px; align-items: center; border: 1.5px dashed var(--ink); padding: 10px 14px; cursor: pointer; background: #fff; }
+  input[type=file] { position: absolute; opacity: 0; width: 1px; height: 1px; }
+  input[type=text], input:not([type]) , input[type=number] { font: inherit; padding: 8px 10px; border: 1.5px solid var(--line); background: #fff; }
+  details { margin-top: 14px; }
+  summary { cursor: pointer; color: var(--muted); }
+
+  /* 채점 중: 연필 선 */
+  .progress { margin-top: 18px; display: none; }
+  .progress.on { display: block; }
+  .track { height: 6px; background: var(--rule); position: relative; overflow: hidden; }
+  .track i { position: absolute; inset: 0 auto 0 0; width: 0; background: var(--ink); transition: width .4s; }
+  .progress p { margin: 6px 0 0; font-size: 14px; }
+  .err { margin-top: 14px; border-left: 4px solid var(--pen); background: #fff; padding: 10px 14px; color: var(--pen); }
+
+  /* 결과 */
+  #results { display: none; }
+  #results.on { display: block; }
+  .boxes { display: flex; flex-wrap: wrap; gap: 14px; margin-left: 38px; }
+  .box { border: 1.5px solid var(--ink); background: #fff; min-width: 120px; text-align: center; }
+  .box b { display: block; border-bottom: 1.5px solid var(--ink); font-size: 13px; padding: 3px 10px; }
+  .box span { display: block; font: 44px/1.1 var(--hand); padding: 6px 10px 2px; }
+  .box.ok span { color: var(--ok); } .box.ng span { color: var(--pen); }
+  .box.rv span { background: linear-gradient(transparent 55%, var(--marker) 55% 90%, transparent 90%); color: var(--ink); }
+  .warn { margin: 10px 0 0 38px; font-size: 14px; color: var(--marker-ink); }
+  .reading { margin: 10px 0 0 38px; font-size: 13px; color: var(--muted); }
+  .legend { margin: 0 0 12px 38px; font-size: 14px; }
+  .legend span { font: 24px/1 var(--hand); color: var(--pen); margin: 0 4px 0 14px; }
+  .gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 22px; margin-left: 38px; }
+  .gallery figure { margin: 0; background: #fff; border: 1px solid var(--line); padding: 6px; }
+  .gallery img { width: 100%; display: block; cursor: zoom-in; }
+  .gallery figcaption { font-size: 14px; padding: 8px 4px 2px; }
+  .gallery figcaption strong { font: 30px/1 var(--hand); color: var(--pen); margin-right: 6px; }
+  .charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 18px; margin-left: 38px; }
+  .charts > div { background: #fff; border: 1px solid var(--line); padding: 10px; height: 290px; }
+  .tablewrap { overflow-x: auto; margin-left: 38px; background: #fff; border: 1px solid var(--line); }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th, td { padding: 8px 10px; text-align: left; border-bottom: 1px solid var(--rule); vertical-align: middle; }
+  th { font-weight: 700; border-bottom: 1.5px solid var(--ink); white-space: nowrap; }
+  td img { max-width: 300px; display: block; border: 1px solid var(--line); }
+  .mark { font: 24px/1 var(--hand); }
+  .mark.correct { color: var(--ok); } .mark.wrong { color: var(--pen); }
+  .mark.review { background: linear-gradient(transparent 50%, var(--marker) 50%); }
+  .pdf { margin-left: 8px; }
+  #lightbox { position: fixed; inset: 0; background: rgba(35, 50, 74, .85); display: none; align-items: center; justify-content: center; z-index: 10; }
+  #lightbox img { max-width: 95vw; max-height: 95vh; background: #fff; }
+  .hidden { display: none !important; }
+  @media (max-width: 640px) {
+    .exam-head > div { grid-template-columns: 1fr; }
+    .scorebox { width: 100%; flex-direction: row; align-items: center; justify-content: space-between; }
+    .scorebox b { border: 0; padding: 0 10px; }
+    .pane, .tabs, .boxes, .gallery, .charts, .tablewrap, .legend, .warn, .reading { margin-left: 0; }
+  }
+  @media (prefers-reduced-motion: reduce) { h1 .circled ellipse { animation: none; stroke-dashoffset: 0; } .track i { transition: none; } }
+</style>
+</head>
+<body>
+<div class="sheet">
+  <header class="exam-head">
+    <div>
+      <div>
+        <span class="period">시연</span><span class="year">2026학년도 AI:ON</span>
+        <h1>손글씨 <span class="circled">채점<svg viewBox="0 0 100 50" preserveAspectRatio="none" aria-hidden="true"><ellipse cx="50" cy="25" rx="47" ry="21" transform="rotate(-3 50 25)"/></svg></span> AI</h1>
+      </div>
+      <div class="scorebox" aria-label="오늘 새로 읽은 답안지 수">
+        <b>오늘 읽은 답안지</b>
+        <span id="todayCount">–</span>
+        <small id="todayLimit">하루 최대 –장</small>
+      </div>
+      <div class="fields">
+        <span>(<em>AI</em>)가 정답을 모른 채 읽고</span>
+        <span>(<em>신경망</em>)이 정답일 확률을 계산하고</span>
+        <span>(<em>선생님</em>)은 애매한 답만 확인</span>
+      </div>
+    </div>
+  </header>
+
+  <div class="notice">
+    <p>※ 예시 답안지를 고르거나, 휴대폰으로 답안지를 찍어 올리세요.</p>
+    <p>※ 답안지 한 장은 30초 안에 채점합니다. 그 안에 읽지 못한 칸은 선생님 확인으로 넘깁니다.</p>
+  </div>
+  <p class="server" id="serverInfo">채점 서버에 연결하는 중…</p>
+  <div id="apiRow">
+    <input id="apiInput" aria-label="채점 서버 주소" placeholder="채점 서버 주소 (예: https://xxxx.trycloudflare.com)" style="flex:1;min-width:260px">
+    <button class="btn" id="apiSave">서버 연결</button>
+  </div>
+
+  <section class="q">
+    <h2><span class="no">1</span>채점할 답안지를 고르세요</h2>
+    <div class="subjects hidden" id="subjects" role="radiogroup" aria-label="과목"></div>
+    <div class="tabs" role="tablist">
+      <button id="tabSample" class="on" role="tab" aria-selected="true">예시 답안지</button>
+      <button id="tabUpload" role="tab" aria-selected="false">내 답안지 찍어 올리기</button>
+    </div>
+
+    <div class="pane" id="paneSample">
+      <p class="hint">여러 장을 골라도 됩니다. 예시 답안지는 AI가 미리 읽어 둔 결과를 씁니다.</p>
+      <div class="samples" id="samples"></div>
+      <div class="actions">
+        <button class="btn" id="runSample">고른 답안지 채점하기</button>
+        <button class="btn plain" id="selectAll">전부 고르기</button>
+      </div>
+    </div>
+
+    <div class="pane hidden" id="paneUpload">
+      <p class="hint">시험지 네 모서리의 검은 사각형이 모두 보이게, 평평한 곳에서 그림자 없이 찍어 주세요. 사진, 아이폰 HEIC, 여러 쪽 PDF, ZIP 모두 됩니다.</p>
+      <div class="actions" style="margin-top:0">
+        <label class="file">📷 카메라로 찍기<input type="file" id="camera" accept="image/*" capture="environment"></label>
+        <label class="file">📁 파일 고르기<input type="file" id="files" multiple accept="image/*,.heic,.heif,.pdf,.zip"></label>
+        <span class="hint" id="fileNames" style="margin:0">고른 파일 없음</span>
+      </div>
+      <details>
+        <summary>정답표, 명렬표, 신경망 바꾸기</summary>
+        <p class="hint" style="margin-top:8px">올리지 않으면 예시 역사 진단평가 정답표와 명렬표를 씁니다. 새 정답표를 올리면 서버가 그 정답표로 신경망을 다시 학습합니다(몇 초). 노트북에서 내보낸 grader.json을 같이 올리면 그 신경망으로 채점합니다.</p>
+        <label class="file">📄 CSV, 엑셀, grader.json<input type="file" id="tables" multiple accept=".csv,.tsv,.txt,.xlsx,.json"></label>
+        <span class="hint" id="tableNames"></span>
+      </details>
+      <div class="actions" id="codeRow">
+        <input id="code" aria-label="시연용 접근 코드" placeholder="시연용 접근 코드">
+      </div>
+      <div class="actions"><button class="btn" id="runUpload">채점하기</button></div>
+    </div>
+
+    <details class="pane">
+      <summary>판정 기준 바꾸기</summary>
+      <div class="actions" style="margin-top:8px">정답으로 볼 확률 P(정답) ≥ <input type="number" id="tHigh" value="0.8" step="0.05" min="0" max="1" style="width:80px"></div>
+      <div class="actions" style="margin-top:8px">오답으로 볼 확률 P(정답) ≤ <input type="number" id="tLow" value="0.2" step="0.05" min="0" max="1" style="width:80px"></div>
+      <div class="actions" style="margin-top:8px"><label><input type="checkbox" id="mixed" checked> 읽을 때마다 결과가 다르면 선생님 확인</label></div>
+      <div class="actions" style="margin-top:8px"><label><input type="checkbox" id="near" checked> 한 글자 차이나 덧붙인 답은 선생님 확인</label></div>
+    </details>
+
+    <div class="pane progress" id="progress" aria-live="polite">
+      <div class="track"><i id="bar"></i></div>
+      <p id="progressText">준비 중</p>
+    </div>
+    <div class="pane" id="status"></div>
+  </section>
+
+  <div id="results">
+    <section class="q">
+      <h2><span class="no">2</span>채점 결과</h2>
+      <div class="boxes" id="kpis"></div>
+      <div id="warnings"></div>
+      <p class="reading" id="readingInfo"></p>
+    </section>
+
+    <section class="q">
+      <h2><span class="no">3</span>채점된 시험지 <a class="pdf hint" id="pdfLink" href="#" target="_blank">전체 PDF 내려받기</a></h2>
+      <p class="legend">문항 번호에 <span>○</span>정답 <span>/</span>오답 <span>(재확인)</span>선생님 확인</p>
+      <div class="gallery" id="gallery"></div>
+    </section>
+
+    <section class="q">
+      <h2><span class="no">4</span>선생님이 확인할 답안</h2>
+      <p class="hint" style="margin-left:38px">칸을 보고 정답이나 오답을 누르면, 점수표와 빨간펜 시험지가 바로 바뀝니다.</p>
+      <div class="tablewrap"><table id="reviewTable"></table></div>
+    </section>
+
+    <section class="q">
+      <h2><span class="no">5</span>한눈에 보기</h2>
+      <div class="charts">
+        <div><canvas id="chJudge"></canvas></div>
+        <div><canvas id="chQuestion"></canvas></div>
+        <div><canvas id="chReason"></canvas></div>
+        <div><canvas id="chScore"></canvas></div>
+      </div>
+    </section>
+
+    <section class="q">
+      <h2><span class="no">6</span>성적표</h2>
+      <div class="tablewrap"><table id="scoreTable"></table></div>
+      <p class="hint" style="margin:18px 0 8px 38px">답안지가 매칭되지 않은 학생</p>
+      <div class="tablewrap"><table id="missingTable"></table></div>
+      <details class="pane">
+        <summary>답안별 판정 전체 보기</summary>
+        <div class="tablewrap" style="margin:10px 0 0"><table id="answerTable"></table></div>
+      </details>
+    </section>
+  </div>
+</div>
+<div id="lightbox"><img alt=""></div>
+<script>
+// ── 채점 서버 주소 ─────────────────────────────────────────────
+// 이 페이지를 서버와 따로 올렸다면(Vercel, GitHub Pages 등) DEFAULT_API에 서버 주소를 적거나,
+// 페이지 주소 뒤에 ?api=서버주소 를 붙이거나, 화면의 '채점 서버 주소' 칸에 입력하세요.
+const DEFAULT_API = '';
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const params = new URLSearchParams(location.search);
+let API = '';
+function setApi(url) {
+  API = (url || '').trim().replace(/\/+$/, '');
+  try { API ? localStorage.setItem('grader_api', API) : localStorage.removeItem('grader_api'); } catch {}
+  $('apiInput').value = API;
+}
+const api = (path) => (path && path.startsWith('/') ? API + path : path);
+(() => {
+  let saved = '';
+  try { saved = localStorage.getItem('grader_api') || ''; } catch {}
+  const sameServer = location.protocol.startsWith('http') && !DEFAULT_API && !params.get('api') && !saved;
+  setApi(params.get('api') || DEFAULT_API || saved || '');
+  if (sameServer) $('apiRow').classList.add('hidden');
+})();
+
+const LABEL = { correct: '정답', review: '선생님 확인', wrong: '오답' };
+const MARK = { correct: '○', review: '(재확인)', wrong: '/' };
+const COLOR = { correct: '#2d5ba3', review: '#ffd84d', wrong: '#d7263d' };
+const SHEET_LIMIT = 30;
+let selected = new Set(), charts = [], SUBJECT = '', CURRENT = null;
+
+async function loadConfig() {
+  try {
+    const c = await (await fetch(api('/v1/config'))).json();
+    $('todayCount').textContent = c.used_today;
+    $('todayLimit').textContent = `하루 최대 ${c.daily_limit}장`;
+    $('serverInfo').classList.remove('bad');
+    $('serverInfo').textContent = (c.live_reading ? `AI 읽기 모델: ${c.vision_model}` : 'AI 읽기 키가 없어, 미리 읽어 둔 예시 답안지만 채점할 수 있습니다')
+      + (API ? ` (서버 ${API})` : '');
+    $('codeRow').classList.toggle('hidden', !c.access_code_required);
+  } catch {
+    $('apiRow').classList.remove('hidden');
+    $('serverInfo').classList.add('bad');
+    $('serverInfo').textContent = '채점 서버에 연결하지 못했습니다. 서버가 꺼졌거나 주소가 바뀌었을 수 있으니, 아래에 서버 주소를 넣고 "서버 연결"을 누르세요.';
+  }
+}
+
+async function loadSubjects() {
+  let list = [];
+  try { const r = await fetch(api('/v1/subjects')); if (r.ok) list = await r.json(); } catch {}
+  $('subjects').classList.toggle('hidden', list.length < 2);
+  if (!list.length) { SUBJECT = ''; return; }
+  if (!list.find((x) => x.name === SUBJECT)) SUBJECT = list[0].name;
+  $('subjects').innerHTML = list.map((x) => `<button role="radio" aria-checked="${x.name === SUBJECT}" class="${x.name === SUBJECT ? 'on' : ''}" data-s="${esc(x.name)}">${esc(x.name)}</button>`).join('');
+  $('subjects').querySelectorAll('button').forEach((b) => b.onclick = () => { SUBJECT = b.dataset.s; selected.clear(); loadSubjects(); loadSamples(); });
+}
+
+async function loadSamples() {
+  let list = [];
+  try { list = await (await fetch(api('/v1/samples' + (SUBJECT ? `?subject=${encodeURIComponent(SUBJECT)}` : '')))).json(); } catch { $('samples').innerHTML = ''; return; }
+  const tilts = [-1.4, 0.9, -0.5, 1.3, -1.0, 0.4, -0.8, 1.1];
+  $('samples').innerHTML = list.map((s, i) =>
+    `<div class="sample" tabindex="0" role="checkbox" aria-checked="false" data-id="${esc(s.id)}" style="--tilt:${tilts[i % tilts.length]}deg">
+       <span class="tick" aria-hidden="true">✓</span>
+       <img src="${esc(api(s.image_url))}" alt="" loading="lazy"><b>${esc(s.title)}</b><span>${esc(s.id)}</span></div>`).join('');
+  document.querySelectorAll('.sample').forEach((el) => {
+    const toggle = () => {
+      const id = el.dataset.id;
+      selected.has(id) ? selected.delete(id) : selected.add(id);
+      el.classList.toggle('on', selected.has(id));
+      el.setAttribute('aria-checked', selected.has(id));
+    };
+    el.onclick = toggle;
+    el.onkeydown = (e) => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); toggle(); } };
+  });
+}
+
+function showTab(sample) {
+  $('tabSample').classList.toggle('on', sample); $('tabUpload').classList.toggle('on', !sample);
+  $('tabSample').setAttribute('aria-selected', sample); $('tabUpload').setAttribute('aria-selected', !sample);
+  $('paneSample').classList.toggle('hidden', !sample); $('paneUpload').classList.toggle('hidden', sample);
+}
+$('tabSample').onclick = () => showTab(true);
+$('tabUpload').onclick = () => showTab(false);
+$('selectAll').onclick = () => document.querySelectorAll('.sample').forEach((el) => {
+  selected.add(el.dataset.id); el.classList.add('on'); el.setAttribute('aria-checked', 'true');
+});
+const showNames = () => {
+  const names = [...$('camera').files, ...$('files').files].map((f) => f.name);
+  $('fileNames').textContent = names.length ? names.join(', ') : '고른 파일 없음';
+};
+$('camera').onchange = showNames; $('files').onchange = showNames;
+$('tables').onchange = () => $('tableNames').textContent = [...$('tables').files].map((f) => f.name).join(', ');
+$('lightbox').onclick = () => $('lightbox').style.display = 'none';
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') $('lightbox').style.display = 'none'; });
+$('apiSave').onclick = async () => { setApi($('apiInput').value); selected.clear(); loadConfig(); await loadSubjects(); loadSamples(); };
+
+function policyForm(fd) {
+  fd.append('t_high', $('tHigh').value); fd.append('t_low', $('tLow').value);
+  fd.append('mixed_reads_to_review', $('mixed').checked); fd.append('near_miss_to_review', $('near').checked);
+}
+
+async function readJson(r) {
+  const text = await r.text();
+  try { return JSON.parse(text); }
+  catch {
+    if ([502, 503, 504, 524].includes(r.status)) throw new Error(`서버 응답이 끊겼습니다 (HTTP ${r.status}). 서버가 꺼졌거나 너무 오래 걸렸습니다. 잠시 뒤 다시 채점해 보세요.`);
+    throw new Error(`서버가 알 수 없는 응답을 보냈습니다 (HTTP ${r.status}). 서버가 꺼졌거나 주소가 바뀌었을 수 있습니다.`);
+  }
+}
+const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
+
+function progress(on, pct, text) {
+  $('progress').classList.toggle('on', on);
+  if (pct != null) $('bar').style.width = `${Math.max(3, Math.min(100, pct))}%`;
+  if (text) $('progressText').textContent = text;
+}
+
+async function run(fd, button, sheets) {
+  policyForm(fd);
+  fd.append('background', 'true');
+  button.disabled = true;
+  $('status').innerHTML = '';
+  progress(true, 3, '답안지를 보내는 중');
+  const started = Date.now();
+  try {
+    const r = await fetch(api('/v1/grade/images'), { method: 'POST', body: fd });
+    let body = await readJson(r);
+    if (!r.ok) throw new Error(typeof body.detail === 'string' ? body.detail : JSON.stringify(body.detail));
+    while (body.job_id && body.status !== 'done') {
+      await sleep(1000);
+      const pr = await fetch(api(`/v1/jobs/${body.job_id}`));
+      const job = await readJson(pr);
+      if (!pr.ok) throw new Error(job.detail || '채점 상태를 확인할 수 없습니다');
+      if (job.status === 'done') { body = job.result; break; }
+      if (job.status === 'error') throw new Error(job.error);
+      const p = job.progress || {};
+      const sec = Math.round((Date.now() - started) / 1000);
+      const pct = p.total ? (p.done / p.total) * 100 : Math.min(90, (sec / (SHEET_LIMIT * Math.max(1, sheets))) * 100);
+      progress(true, pct, `${p.message || '채점 중'}  ${p.total ? `(${p.done}/${p.total}장)` : ''}  ${sec}초 지남, 한 장에 최대 ${SHEET_LIMIT}초`);
+    }
+    progress(true, 100, `채점 끝 (${Math.round((Date.now() - started) / 1000)}초)`);
+    render(body);
+  } catch (e) {
+    progress(false);
+    $('status').innerHTML = `<div class="err">${esc(e.message)}</div>`;
+  } finally { button.disabled = false; loadConfig(); }
+}
+
+$('runSample').onclick = () => {
+  if (!selected.size) { $('status').innerHTML = '<div class="err">채점할 예시 답안지를 하나 이상 고르세요.</div>'; return; }
+  const fd = new FormData(); fd.append('sample_ids', [...selected].join(','));
+  run(fd, $('runSample'), selected.size);
+};
+$('runUpload').onclick = () => {
+  const files = [...$('camera').files, ...$('files').files];
+  if (!files.length) { $('status').innerHTML = '<div class="err">답안지 사진이나 파일을 고르세요.</div>'; return; }
+  const fd = new FormData();
+  files.forEach((f) => fd.append('sheets', f));
+  [...$('tables').files].forEach((f) => fd.append('tables', f));
+  fd.append('access_code', $('code').value);
+  if (SUBJECT) fd.append('subject', SUBJECT);
+  run(fd, $('runUpload'), files.length);
+};
+
+function table(id, head, rows) {
+  $(id).innerHTML = `<thead><tr>${head.map((h) => `<th>${h}</th>`).join('')}</tr></thead><tbody>${
+    rows.length ? rows.map((r) => `<tr>${r.map((c) => `<td>${c}</td>`).join('')}</tr>`).join('') : `<tr><td colspan="${head.length}">없음</td></tr>`}</tbody>`;
+}
+
+function reasonKind(reason) {
+  const kinds = [['읽지 못함', '시간 초과'], ['두 개', '답 두 개'], ['칸 밖', '칸 밖 글씨'], ['지저분', '지운 자국 등'], ['순서', '순서 바뀜'], ['혼동쌍', '헷갈리는 글자'],
+                 ['일부만 정답', '읽을 때마다 다름'], ['한 글자', '한 글자 차이'], ['P(정답)', '애매한 확률']];
+  return (kinds.find(([w]) => reason.includes(w)) || [null, '기타'])[1];
+}
+
+const fin = (a) => a.final || a.decision;
+
+async function teacherDecide(sheet, q, decision, btn) {
+  if (!CURRENT || !CURRENT.run_id) return;
+  btn.disabled = true;
+  try {
+    const r = await fetch(api(`/v1/runs/${CURRENT.run_id}/decisions`), { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sheet_id: sheet, question: q, decision }) });
+    const body = await readJson(r);
+    if (!r.ok) throw new Error(body.detail || '저장하지 못했습니다');
+    render(body, false);
+  } catch (e) {
+    $('status').innerHTML = `<div class="err">${esc(e.message)}</div>`;
+    btn.disabled = false;
+  }
+}
+
+function render(d, scroll = true) {
+  CURRENT = d;
+  $('results').classList.add('on');
+  const s = d.summary;
+  $('kpis').innerHTML = `
+    <div class="box"><b>답안지</b><span>${s.sheets}장</span></div>
+    <div class="box ok"><b>자동 정답</b><span>${s.correct}</span></div>
+    <div class="box ng"><b>자동 오답</b><span>${s.wrong}</span></div>
+    <div class="box rv"><b>선생님 확인</b><span>${s.review - (s.teacher_decided || 0)}${s.teacher_decided ? `<small style="font-size:16px"> / ${s.review}</small>` : ''}</span></div>
+    <div class="box"><b>자동으로 끝난 비율</b><span>${Math.round(s.auto_rate * 100)}%</span></div>
+    <div class="box"><b>학생 확인 필요</b><span>${s.identification_review}장</span></div>`;
+  $('warnings').innerHTML = (d.warnings || []).map((w) => `<p class="warn">※ ${esc(w)}</p>`).join('') +
+    d.sheet_images.filter((x) => !x.aligned).map((x) => `<p class="warn">※ ${esc(x.sheet_id)}: 모서리 표시를 못 찾아 칸이 어긋났을 수 있습니다</p>`).join('');
+  const rd = d.reading, mi = d.model_info || {};
+  const src = { trained_for_answer_key: '이 정답표로 학습한 신경망', notebook_upload: '노트북에서 학습해 올린 신경망',
+                notebook: 'Colab 노트북에서 학습한 신경망' }[mi.source] || '미리 학습한 신경망';
+  $('readingInfo').textContent = `AI가 ${rd.reads}번 읽었습니다(새로 읽음 ${rd.new_calls}번, 미리 읽어 둔 결과 ${rd.cached}번)` +
+    (rd.new_calls ? `, 토큰 ${rd.tokens.toLocaleString()}개, 호출 한 번에 평균 ${rd.avg_call_seconds}초 (모델 ${rd.model})` : '') + `. 판정: ${src}` +
+    (mi.val_accuracy ? ` (검증 정확도 ${(mi.val_accuracy * 100).toFixed(1)}%)` : '') + '.';
+  $('pdfLink').href = api(d.pdf_url);
+
+  const scoreBy = Object.fromEntries(d.scores.map((x) => [x.sheet_id, x]));
+  $('gallery').innerHTML = d.sheet_images.map((x) => {
+    const sc = scoreBy[x.sheet_id];
+    return `<figure><img src="${api(x.graded_url)}" alt="${esc(x.sheet_id)} 채점 결과"><figcaption><strong>${sc.score}점</strong>${esc(sc.student)}
+      ${sc.review_count ? `<br>선생님 확인 ${sc.review_count}문항 남음 (최대 ${sc.score + sc.pending_points}점)` : ''}
+      ${x.outside_questions.length ? `<br>칸 밖 글씨: ${x.outside_questions.join(', ')}번` : ''}</figcaption></figure>`;
+  }).join('');
+  document.querySelectorAll('.gallery img').forEach((img) => img.onclick = () => {
+    $('lightbox').querySelector('img').src = img.src; $('lightbox').style.display = 'flex';
+  });
+
+  const canDecide = d.review_items.length > 0 && 'teacher_decision' in d.review_items[0];   // 선생님 판정을 받는 서버일 때만
+  table('reviewTable', ['답안지', '문항', '답안 칸', 'AI가 읽은 결과', '확인할 이유'].concat(canDecide ? ['선생님 판정'] : []),
+    d.review_items.map((r) => [`${esc(r.sheet_id)}<br><span class="hint">${esc(r.student)}</span>`, `${r.question}번`,
+      r.image_url ? `<img src="${api(r.image_url)}" alt="">` : '', esc(r.reads.filter(Boolean).join(' / ') || '(읽지 못함)'), esc(r.reason)]
+      .concat(canDecide ? [r.teacher_decision
+        ? `<span class="decided ${r.teacher_decision}">${MARK[r.teacher_decision]}</span> ${LABEL[r.teacher_decision]}<button class="undo" data-s="${esc(r.sheet_id)}" data-q="${r.question}" data-d="undo">되돌리기</button>`
+        : `<div class="decide"><button class="ok" data-s="${esc(r.sheet_id)}" data-q="${r.question}" data-d="correct">○ 정답</button><button class="ng" data-s="${esc(r.sheet_id)}" data-q="${r.question}" data-d="wrong">/ 오답</button></div>`] : [])));
+  $('reviewTable').querySelectorAll('button[data-d]').forEach((b) => b.onclick = () => teacherDecide(b.dataset.s, Number(b.dataset.q), b.dataset.d, b));
+  $('reviewTable').querySelectorAll('tbody tr').forEach((tr, i) => tr.classList.toggle('rowdone', !!(d.review_items[i] && d.review_items[i].teacher_decision)));
+  table('scoreTable', ['답안지', '학생', '확정 점수', '선생님 확인', '상태'],
+    d.scores.map((x) => [esc(x.sheet_id), esc(x.student), `<span class="mark wrong">${x.score}</span> / ${x.max_score}`,
+      x.review_count ? `${x.review_count}문항` : '없음',
+      x.identification !== 'matched' ? `학생 확인 필요: ${esc(x.identification_reason)}` : (x.status === 'confirmed' ? '확정' : '선생님 확인 후 확정')]));
+  table('missingTable', ['학생', '이 학생 것일 수 있는 답안지'],
+    d.missing_students.map((m) => [`${m.class_no}반 ${m.number}번 ${esc(m.name)}`, esc(m.candidate_sheets.join(', ') || '없음 (미제출?)')]));
+  table('answerTable', ['답안지', '문항', '읽은 답', 'P(정답)', '판정', '이유'],
+    d.answers.map((a) => [esc(a.sheet_id), a.question, esc(a.read_answer) + (a.messy ? ' *' : '') + (a.outside ? ' !' : ''),
+      a.p_correct.toFixed(3), `<span class="mark ${fin(a)}">${MARK[fin(a)]}</span> ${LABEL[fin(a)]}` + (a.final && a.final !== a.decision ? ' (선생님 판정)' : ''), esc(a.reason)]));
+  drawCharts(d);
+  if (scroll) $('results').scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
+}
+
+function drawCharts(d) {
+  if (!window.Chart) return;
+  Chart.defaults.font.family = '"IBM Plex Sans KR", sans-serif';
+  Chart.defaults.color = '#23324a';
+  charts.forEach((c) => c.destroy()); charts = [];
+  const order = ['correct', 'review', 'wrong'];
+  const border = { correct: '#2d5ba3', review: '#c9a400', wrong: '#d7263d' };
+  const count = (k) => d.answers.filter((a) => fin(a) === k).length;
+  const title = (text) => ({ display: true, text, align: 'start', font: { size: 15, weight: 'bold' } });
+  charts.push(new Chart($('chJudge'), { type: 'doughnut',
+    data: { labels: order.map((k) => LABEL[k]), datasets: [{ data: order.map(count), backgroundColor: order.map((k) => COLOR[k]), borderColor: order.map((k) => border[k]) }] },
+    options: { maintainAspectRatio: false, cutout: '58%', plugins: { title: title('판정 결과') } } }));
+  const qs = [...new Set(d.answers.map((a) => a.question))].sort((a, b) => a - b);
+  charts.push(new Chart($('chQuestion'), { type: 'bar',
+    data: { labels: qs.map((q) => `${q}번`), datasets: order.map((k) => ({ label: LABEL[k], backgroundColor: COLOR[k], borderColor: border[k], borderWidth: 1,
+      data: qs.map((q) => d.answers.filter((a) => a.question === q && fin(a) === k).length) })) },
+    options: { maintainAspectRatio: false, scales: { x: { stacked: true, grid: { display: false } }, y: { stacked: true, ticks: { precision: 0 } } },
+      plugins: { title: title('문항별 판정') } } }));
+  const reasons = {};
+  d.review_items.filter((r) => !r.teacher_decision).forEach((r) => { const k = reasonKind(r.reason); reasons[k] = (reasons[k] || 0) + 1; });
+  charts.push(new Chart($('chReason'), { type: 'bar',
+    data: { labels: Object.keys(reasons), datasets: [{ label: '답안 수', data: Object.values(reasons), backgroundColor: COLOR.review, borderColor: border.review, borderWidth: 1 }] },
+    options: { indexAxis: 'y', maintainAspectRatio: false, plugins: { legend: { display: false }, title: title('아직 선생님 확인이 남은 이유') },
+      scales: { x: { ticks: { precision: 0 } }, y: { grid: { display: false } } } } }));
+  charts.push(new Chart($('chScore'), { type: 'bar',
+    data: { labels: d.scores.map((x) => x.sheet_id), datasets: [
+      { label: '확정 점수', data: d.scores.map((x) => x.score), backgroundColor: COLOR.wrong },
+      { label: '확인 후 더해질 수 있는 점수', data: d.scores.map((x) => x.pending_points), backgroundColor: COLOR.review }] },
+    options: { indexAxis: 'y', maintainAspectRatio: false,
+      scales: { x: { stacked: true, max: Math.max(...d.scores.map((x) => x.max_score)) }, y: { stacked: true, grid: { display: false } } },
+      plugins: { title: title('학생별 점수') } } }));
+}
+
+loadConfig();
+loadSubjects().then(loadSamples);
+</script>
+</body>
+</html>

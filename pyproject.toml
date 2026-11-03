@@ -1,0 +1,9 @@
+[tool.pytest.ini_options]
+pythonpath = [".", "tests"]
+testpaths = ["tests"]
+filterwarnings = [
+    # Starlette TestClient가 httpx 대신 다른 패키지를 권하는 안내. 테스트 결과와 무관하다
+    "ignore:Using `httpx` with `starlette.testclient` is deprecated",
+    # PyMuPDF를 불러올 때 나오는 내부 경고 (SWIG). 동작과 무관하다
+    "ignore:builtin type (SwigPy|swigvarlink).* has no __module__ attribute:DeprecationWarning",
+]

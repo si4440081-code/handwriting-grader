@@ -1,0 +1,405 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>손글씨 채점 시연 서버 구조</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+KR:wght@400;600;700&family=Nanum+Pen+Script&display=swap" rel="stylesheet">
+<style>
+:root {
+  /* 시험지 위의 남색 잉크와 빨간펜: 멘티 시연 웹페이지의 색을 따른다. 본문은 한 단, 그림은 넓게 */
+  --paper: #f5f7fb;
+  --card: #ffffff;
+  --ink: #1f2d45;
+  --muted: #5a6478;
+  --line: #c6cedb;
+  --pen: #c8232f;
+  --pen-soft: #fbe9ea;
+  --ok: #2d5ba3;
+  --ok-soft: #e7eef9;
+  --warn: #a37800;
+  --warn-soft: #fff4c9;
+  --body: "IBM Plex Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
+  --hand: "Nanum Pen Script", "IBM Plex Sans KR", cursive;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #11161f; --card: #19202d; --ink: #e5e9f1; --muted: #9ba5b7; --line: #3a4458;
+    --pen: #ff6b73; --pen-soft: #3a1d22; --ok: #8fb2ee; --ok-soft: #1c2a42; --warn: #f2c94c; --warn-soft: #3a3115;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #11161f; --card: #19202d; --ink: #e5e9f1; --muted: #9ba5b7; --line: #3a4458;
+  --pen: #ff6b73; --pen-soft: #3a1d22; --ok: #8fb2ee; --ok-soft: #1c2a42; --warn: #f2c94c; --warn-soft: #3a3115;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html { background: var(--paper); }
+body { margin: 0; background: var(--paper); color: var(--ink); font: 16px/1.7 var(--body); }
+main { max-width: 1140px; margin: 0 auto; padding: 40px 20px 64px; display: grid; gap: 44px; }
+header { display: grid; gap: 10px; max-width: 70ch; }
+h1 { margin: 0; font-size: 34px; line-height: 1.25; text-wrap: balance; }
+h1 .hand { font-family: var(--hand); font-weight: 400; color: var(--pen); font-size: 30px; margin-left: 10px; }
+h2 { margin: 0 0 6px; font-size: 22px; text-wrap: balance; }
+p { margin: 0; }
+.lead { color: var(--muted); }
+section { display: grid; gap: 14px; }
+section > p { max-width: 72ch; }
+figure { margin: 0; background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 18px 16px 14px; overflow-x: auto; }
+figure svg { display: block; width: 100%; min-width: 760px; height: auto; color: var(--ink); }
+figcaption { margin-top: 12px; color: var(--muted); font-size: 14.5px; max-width: 80ch; }
+code { font-family: var(--mono); font-size: 0.88em; color: var(--ok); }
+svg text { font-family: var(--body); font-size: 12px; fill: currentColor; }
+svg .t-title { font-size: 14px; font-weight: 700; }
+svg .t-mono { font-family: var(--mono); font-size: 11.5px; fill: var(--ok); }
+svg .t-desc { fill: var(--muted); }
+svg .t-lbl { font-size: 11.5px; fill: var(--muted); }
+svg .t-pen { fill: var(--pen); }
+svg .t-big { font-size: 18px; font-weight: 700; }
+svg .bx { fill: var(--card); stroke: var(--line); stroke-width: 1.4; }
+svg .bx-ext { fill: var(--pen-soft); stroke: var(--pen); stroke-width: 1.6; }
+svg .bx-ok { fill: var(--ok-soft); stroke: var(--ok); stroke-width: 1.6; }
+svg .bx-warn { fill: var(--warn-soft); stroke: var(--warn); stroke-width: 1.6; }
+svg .bx-wrong { fill: var(--pen-soft); stroke: var(--pen); stroke-width: 1.6; }
+svg .bx-soft { fill: var(--paper); stroke: var(--line); stroke-width: 1.4; }
+svg .ln { stroke: currentColor; stroke-width: 1.4; fill: none; }
+svg .ln-pen { stroke: var(--pen); stroke-width: 1.6; fill: none; }
+svg .dash { stroke-dasharray: 5 4; }
+svg .mk { fill: currentColor; }
+svg .mk-pen { fill: var(--pen); }
+table { width: 100%; border-collapse: collapse; background: var(--card); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; font-size: 15px; }
+th, td { text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { font-weight: 600; color: var(--muted); font-size: 13.5px; background: var(--paper); }
+tr:last-child td { border-bottom: 0; }
+.table-wrap { overflow-x: auto; }
+.status { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); }
+.chip { display: grid; gap: 4px; padding: 12px 14px; border-radius: 10px; border: 1px solid var(--line); background: var(--card); border-left: 5px solid var(--ok); }
+.chip.warn { border-left-color: var(--warn); }
+.chip b { font-size: 15px; }
+.chip span { color: var(--muted); font-size: 14px; }
+@media (max-width: 600px) { h1 { font-size: 27px; } main { gap: 34px; } }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>손글씨 채점 시연 서버 구조<span class="hand">멘티 웹페이지 + 독립 서버</span></h1>
+    <p class="lead">멘티 노트북의 채점 과정을 Colab 밖에서 도는 서버로 옮긴 구조입니다. 시연 웹페이지는 그대로 두고, 웹페이지가 부르는 주소를 서버가 같은 형식으로 돌려줍니다. 손글씨를 읽는 일만 외부 Gemini가 하고, 정답표와 판정은 모두 서버 안에 있습니다.</p>
+  </header>
+
+  <section>
+    <h2>1. 구성 요소와 연결</h2>
+    <figure>
+      <svg viewBox="0 0 1138 352" role="img" aria-label="시연 웹페이지는 api/demo.py만 부르고, 시연 서버가 사진 처리와 채점 엔진을 차례로 부르며, 손글씨 읽기만 외부 Gemini가 한다">
+        <defs>
+          <marker id="a1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="mk"/></marker>
+          <marker id="a1p" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="mk-pen"/></marker>
+        </defs>
+        <!-- 1행: 요청이 지나가는 길 -->
+        <rect class="bx" x="16" y="40" width="170" height="104" rx="8"/>
+        <text class="t-title" x="30" y="66">시연 웹페이지</text>
+        <text class="t-mono" x="30" y="86">web/index.html</text>
+        <text class="t-desc" x="30" y="108">멘티가 만든 화면</text>
+        <text class="t-desc" x="30" y="126">브라우저, 휴대폰</text>
+
+        <rect class="bx" x="250" y="40" width="170" height="104" rx="8"/>
+        <text class="t-title" x="264" y="66">웹페이지 주소</text>
+        <text class="t-mono" x="264" y="86">api/demo.py</text>
+        <text class="t-desc" x="264" y="108">노트북 5-2와 같은</text>
+        <text class="t-desc" x="264" y="126">요청, 응답 7개</text>
+
+        <rect class="bx" x="484" y="40" width="170" height="104" rx="8"/>
+        <text class="t-title" x="498" y="66">시연 서버</text>
+        <text class="t-mono" x="498" y="86">demo/server.py</text>
+        <text class="t-desc" x="498" y="108">채점 차례, 진행률</text>
+        <text class="t-desc" x="498" y="126">결과 보관, 선생님 판정</text>
+
+        <rect class="bx" x="718" y="40" width="170" height="104" rx="8"/>
+        <text class="t-title" x="732" y="66">사진 처리</text>
+        <text class="t-mono" x="732" y="86">vision/</text>
+        <text class="t-desc" x="732" y="108">펴기, 정렬, 칸 자르기</text>
+        <text class="t-desc" x="732" y="126">AI 읽기, 빨간펜</text>
+
+        <rect class="bx-ext" x="952" y="40" width="170" height="104" rx="8"/>
+        <text class="t-title t-pen" x="966" y="66">Gemini API</text>
+        <text class="t-desc" x="966" y="86">외부 서비스, 키 필요</text>
+        <text class="t-desc" x="966" y="108">정답을 모른 채</text>
+        <text class="t-desc" x="966" y="126">보이는 글자를 읽음</text>
+
+        <line class="ln" x1="186" y1="76" x2="248" y2="76" marker-end="url(#a1)"/>
+        <text class="t-lbl" x="218" y="68" text-anchor="middle">요청</text>
+        <line class="ln" x1="250" y1="108" x2="188" y2="108" marker-end="url(#a1)"/>
+        <text class="t-lbl" x="218" y="124" text-anchor="middle">결과</text>
+
+        <line class="ln" x1="420" y1="76" x2="482" y2="76" marker-end="url(#a1)"/>
+        <text class="t-lbl" x="452" y="68" text-anchor="middle">채점 맡김</text>
+        <line class="ln" x1="484" y1="108" x2="422" y2="108" marker-end="url(#a1)"/>
+        <text class="t-lbl" x="452" y="124" text-anchor="middle">진행률</text>
+
+        <line class="ln" x1="654" y1="76" x2="716" y2="76" marker-end="url(#a1)"/>
+        <text class="t-lbl" x="686" y="68" text-anchor="middle">답안지</text>
+        <line class="ln" x1="718" y1="108" x2="656" y2="108" marker-end="url(#a1)"/>
+        <text class="t-lbl" x="686" y="124" text-anchor="middle">읽은 글자</text>
+
+        <line class="ln-pen" x1="888" y1="76" x2="950" y2="76" marker-end="url(#a1p)"/>
+        <text class="t-lbl t-pen" x="920" y="68" text-anchor="middle">칸 이미지</text>
+        <line class="ln-pen" x1="952" y1="108" x2="890" y2="108" marker-end="url(#a1p)"/>
+        <text class="t-lbl t-pen" x="920" y="124" text-anchor="middle">읽은 글자</text>
+
+        <!-- 2행: 채점 기준과 자료 -->
+        <rect class="bx-soft" x="16" y="232" width="170" height="104" rx="8"/>
+        <text class="t-title" x="30" y="258">Colab 노트북</text>
+        <text class="t-desc" x="30" y="278">멘티가 학습, 검증</text>
+        <text class="t-desc" x="30" y="300">3-7 grader.json</text>
+        <text class="t-desc" x="30" y="318">4-4 gemini_cache.json</text>
+
+        <rect class="bx" x="250" y="232" width="170" height="104" rx="8"/>
+        <text class="t-title" x="264" y="258">텍스트 채점</text>
+        <text class="t-mono" x="264" y="278">api/main.py</text>
+        <text class="t-desc" x="264" y="300">이미 읽은 글자로 채점</text>
+        <text class="t-desc" x="264" y="318">/v1/grade, CSV, 엑셀</text>
+
+        <rect class="bx" x="484" y="232" width="170" height="104" rx="8"/>
+        <text class="t-title" x="498" y="258">채점 엔진</text>
+        <text class="t-mono" x="498" y="278">grader/</text>
+        <text class="t-desc" x="498" y="300">특징 8개 → P(정답)</text>
+        <text class="t-desc" x="498" y="318">판정 규칙, 성적표</text>
+
+        <rect class="bx" x="718" y="232" width="170" height="104" rx="8"/>
+        <text class="t-title" x="732" y="258">과목</text>
+        <text class="t-mono" x="732" y="278">demo/subjects.py</text>
+        <text class="t-desc" x="732" y="300">정답표, 명렬표</text>
+        <text class="t-desc" x="732" y="318">과목별 신경망 학습</text>
+
+        <rect class="bx" x="952" y="232" width="170" height="104" rx="8"/>
+        <text class="t-title" x="966" y="258">과목 자료</text>
+        <text class="t-mono" x="966" y="278">data/subjects/</text>
+        <text class="t-desc" x="966" y="300">정답표, 명렬표 엑셀</text>
+        <text class="t-desc" x="966" y="318">예시 답안지 사진</text>
+
+        <line class="ln dash" x1="101" y1="232" x2="101" y2="146" marker-end="url(#a1)"/>
+        <text class="t-lbl" x="110" y="194">grader.json 올리기</text>
+
+        <line class="ln" x1="569" y1="144" x2="569" y2="230" marker-end="url(#a1)"/>
+        <text class="t-lbl" x="578" y="194">판정 맡김</text>
+
+        <line class="ln" x1="760" y1="232" x2="656" y2="146" marker-end="url(#a1)"/>
+        <text class="t-lbl" x="728" y="176">정답표, 신경망</text>
+
+        <line class="ln" x1="420" y1="284" x2="482" y2="284" marker-end="url(#a1)"/>
+        <text class="t-lbl" x="451" y="276" text-anchor="middle">읽은 글자</text>
+
+        <line class="ln" x1="952" y1="284" x2="890" y2="284" marker-end="url(#a1)"/>
+        <text class="t-lbl" x="921" y="276" text-anchor="middle">켤 때 읽음</text>
+      </svg>
+      <figcaption>웹페이지는 <code>api/demo.py</code>의 주소만 부르고, 채점은 시연 서버가 한 번에 하나씩 맡습니다. 빨간 선이 서버 밖으로 나가는 유일한 길(손글씨 읽기)입니다. 노트북에서 학습한 신경망은 웹페이지로 올려 바꿀 수 있고, 노트북이 미리 읽어 둔 결과는 <code>data/gemini_cache.json</code>에 넣어 키 없이 쓸 수 있습니다.</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>2. 사진 한 장이 채점되는 순서</h2>
+    <figure>
+      <svg viewBox="0 0 1072 340" role="img" aria-label="올리기, 펼치기, 정렬과 칸 자르기, AI 읽기, 특징, P(정답), 판정 규칙, 식별과 성적표, 빨간펜 순서로 채점하고, 선생님 판정은 식별과 성적표 단계부터 다시 계산한다">
+        <defs>
+          <marker id="a2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="mk"/></marker>
+          <marker id="a2p" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="mk-pen"/></marker>
+        </defs>
+        <text class="t-lbl t-pen" x="752" y="46" text-anchor="middle">한 번 읽은 답안지는 저장한 결과를 다시 씀</text>
+
+        <rect class="bx" x="16" y="60" width="176" height="80" rx="8"/>
+        <text class="t-title" x="30" y="86">① 올리기</text>
+        <text class="t-mono" x="30" y="106">api/demo.py</text>
+        <text class="t-desc" x="30" y="126">작업 번호를 바로 돌려줌</text>
+
+        <rect class="bx" x="232" y="60" width="176" height="80" rx="8"/>
+        <text class="t-title" x="246" y="86">② 펼치기</text>
+        <text class="t-mono" x="246" y="106">vision/pages.py</text>
+        <text class="t-desc" x="246" y="126">사진, heic, PDF, ZIP</text>
+
+        <rect class="bx" x="448" y="60" width="176" height="80" rx="8"/>
+        <text class="t-title" x="462" y="86">③ 정렬, 칸 자르기</text>
+        <text class="t-mono" x="462" y="106">vision/layout.py</text>
+        <text class="t-desc" x="462" y="126">네 모서리, 칸 밖 글씨</text>
+
+        <rect class="bx-ext" x="664" y="60" width="176" height="80" rx="8"/>
+        <text class="t-title t-pen" x="678" y="86">④ AI 읽기</text>
+        <text class="t-mono" x="678" y="106">vision/reader.py</text>
+        <text class="t-desc" x="678" y="126">2번 동시에, 다르면 3번째</text>
+
+        <rect class="bx" x="880" y="60" width="176" height="80" rx="8"/>
+        <text class="t-title" x="894" y="86">⑤ 특징 8개</text>
+        <text class="t-mono" x="894" y="106">grader/features.py</text>
+        <text class="t-desc" x="894" y="126">정답읽힘비율, 일치율 등</text>
+
+        <line class="ln" x1="192" y1="100" x2="230" y2="100" marker-end="url(#a2)"/>
+        <line class="ln" x1="408" y1="100" x2="446" y2="100" marker-end="url(#a2)"/>
+        <line class="ln" x1="624" y1="100" x2="662" y2="100" marker-end="url(#a2)"/>
+        <line class="ln" x1="840" y1="100" x2="878" y2="100" marker-end="url(#a2)"/>
+        <polyline class="ln" points="968,140 968,175 104,175 104,208" marker-end="url(#a2)"/>
+
+        <rect class="bx" x="16" y="210" width="176" height="80" rx="8"/>
+        <text class="t-title" x="30" y="236">⑥ P(정답)</text>
+        <text class="t-mono" x="30" y="256">grader/model.py</text>
+        <text class="t-desc" x="30" y="276">과목별 신경망</text>
+
+        <rect class="bx" x="232" y="210" width="176" height="80" rx="8"/>
+        <text class="t-title" x="246" y="236">⑦ 판정 규칙</text>
+        <text class="t-mono" x="246" y="256">grader/judge.py</text>
+        <text class="t-desc" x="246" y="276">정답, 오답, 선생님 확인</text>
+
+        <rect class="bx" x="448" y="210" width="176" height="80" rx="8"/>
+        <text class="t-title" x="462" y="236">⑧ 식별, 성적표</text>
+        <text class="t-mono" x="462" y="256">grader/pipeline.py</text>
+        <text class="t-desc" x="462" y="276">반+번호 찾고 이름 확인</text>
+
+        <rect class="bx" x="664" y="210" width="176" height="80" rx="8"/>
+        <text class="t-title" x="678" y="236">⑨ 빨간펜</text>
+        <text class="t-mono" x="678" y="256">vision/redpen.py</text>
+        <text class="t-desc" x="678" y="276">동그라미, 빗금, PDF</text>
+
+        <rect class="bx-ok" x="880" y="210" width="176" height="80" rx="8"/>
+        <text class="t-title" x="894" y="236">결과</text>
+        <text class="t-mono" x="894" y="256">/v1/jobs/{id}</text>
+        <text class="t-desc" x="894" y="276">웹페이지가 1초마다 조회</text>
+
+        <line class="ln" x1="192" y1="250" x2="230" y2="250" marker-end="url(#a2)"/>
+        <line class="ln" x1="408" y1="250" x2="446" y2="250" marker-end="url(#a2)"/>
+        <line class="ln" x1="624" y1="250" x2="662" y2="250" marker-end="url(#a2)"/>
+        <line class="ln" x1="840" y1="250" x2="878" y2="250" marker-end="url(#a2)"/>
+        <polyline class="ln dash" points="968,290 968,322 536,322 536,292" marker-end="url(#a2)"/>
+        <text class="t-lbl" x="752" y="316" text-anchor="middle">선생님 판정: ⑧, ⑨만 다시 계산</text>
+      </svg>
+      <figcaption>①에서 작업 번호를 받은 웹페이지는 끝날 때까지 진행률을 묻습니다. ④는 정답을 모른 채 같은 답안지를 두 번 동시에 읽고, 두 결과가 다를 때만 세 번째를 읽습니다. 키, 결제, 모델 문제로 거절되면 기다리지 않고 바로 선생님 확인으로 보냅니다. 선생님이 확인 문항을 정답이나 오답으로 정하면 AI 읽기와 판정은 그대로 두고 성적표와 빨간펜 그림만 다시 만듭니다.</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>3. 판정 순서</h2>
+    <figure>
+      <svg viewBox="0 0 760 548" role="img" aria-label="규칙 일곱 개 중 하나라도 걸리면 확률과 상관없이 선생님 확인이고, 모두 통과하면 P(정답)이 0.8 이상이면 정답, 0.2 이하면 오답, 그 사이면 선생님 확인이다" style="min-width:600px; max-width:820px">
+        <defs>
+          <marker id="a3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="mk"/></marker>
+        </defs>
+        <rect class="bx-soft" x="40" y="16" width="320" height="44" rx="8"/>
+        <text x="200" y="43" text-anchor="middle">읽은 글자, 특징 8개, P(정답)</text>
+        <line class="ln" x1="200" y1="60" x2="200" y2="78" marker-end="url(#a3)"/>
+
+        <rect class="bx" x="40" y="80" width="320" height="34" rx="6"/>
+        <text x="200" y="102" text-anchor="middle">1  칸 밖에 쓴 글씨</text>
+        <rect class="bx" x="40" y="126" width="320" height="34" rx="6"/>
+        <text x="200" y="148" text-anchor="middle">2  답을 두 개 이상 씀 (쉼표)</text>
+        <rect class="bx" x="40" y="172" width="320" height="34" rx="6"/>
+        <text x="200" y="194" text-anchor="middle">3  지저분한 칸 (지운 자국 등)</text>
+        <rect class="bx" x="40" y="218" width="320" height="34" rx="6"/>
+        <text x="200" y="240" text-anchor="middle">4  순서만 다름 (이신순)</text>
+        <rect class="bx" x="40" y="264" width="320" height="34" rx="6"/>
+        <text x="200" y="286" text-anchor="middle">5  혼동쌍만 다름 (훈민정읍, 팔만대장견)</text>
+        <rect class="bx" x="40" y="310" width="320" height="34" rx="6"/>
+        <text x="200" y="332" text-anchor="middle">6  읽기가 엇갈림 (일부만 정답)</text>
+        <rect class="bx" x="40" y="356" width="320" height="34" rx="6"/>
+        <text x="200" y="378" text-anchor="middle">7  한 글자 차이, 말이 붙음 (평양입니다)</text>
+
+        <line class="ln" x1="200" y1="114" x2="200" y2="124" marker-end="url(#a3)"/>
+        <line class="ln" x1="200" y1="160" x2="200" y2="170" marker-end="url(#a3)"/>
+        <line class="ln" x1="200" y1="206" x2="200" y2="216" marker-end="url(#a3)"/>
+        <line class="ln" x1="200" y1="252" x2="200" y2="262" marker-end="url(#a3)"/>
+        <line class="ln" x1="200" y1="298" x2="200" y2="308" marker-end="url(#a3)"/>
+        <line class="ln" x1="200" y1="344" x2="200" y2="354" marker-end="url(#a3)"/>
+        <line class="ln" x1="200" y1="390" x2="200" y2="410" marker-end="url(#a3)"/>
+        <text class="t-lbl" x="208" y="404">모두 통과</text>
+
+        <line class="ln" x1="360" y1="97" x2="518" y2="97" marker-end="url(#a3)"/>
+        <line class="ln" x1="360" y1="143" x2="518" y2="143" marker-end="url(#a3)"/>
+        <line class="ln" x1="360" y1="189" x2="518" y2="189" marker-end="url(#a3)"/>
+        <line class="ln" x1="360" y1="235" x2="518" y2="235" marker-end="url(#a3)"/>
+        <line class="ln" x1="360" y1="281" x2="518" y2="281" marker-end="url(#a3)"/>
+        <line class="ln" x1="360" y1="327" x2="518" y2="327" marker-end="url(#a3)"/>
+        <line class="ln" x1="360" y1="373" x2="518" y2="373" marker-end="url(#a3)"/>
+        <text class="t-lbl" x="440" y="91" text-anchor="middle">걸리면</text>
+
+        <rect class="bx" x="40" y="412" width="320" height="34" rx="6"/>
+        <text x="200" y="434" text-anchor="middle">P(정답) 기준값 0.8, 0.2</text>
+        <line class="ln" x1="360" y1="429" x2="518" y2="429" marker-end="url(#a3)"/>
+        <text class="t-lbl" x="440" y="423" text-anchor="middle">0.2 &lt; P &lt; 0.8</text>
+
+        <rect class="bx-warn" x="520" y="80" width="200" height="366" rx="10"/>
+        <text class="t-big" x="620" y="246" text-anchor="middle">선생님 확인</text>
+        <text class="t-desc" x="620" y="270" text-anchor="middle">확인 전까지 0점</text>
+        <text class="t-desc" x="620" y="290" text-anchor="middle">웹페이지에서 ○, / 로 정함</text>
+
+        <line class="ln" x1="120" y1="446" x2="120" y2="488" marker-end="url(#a3)"/>
+        <text class="t-lbl" x="128" y="472">P ≥ 0.8</text>
+        <line class="ln" x1="290" y1="446" x2="290" y2="488" marker-end="url(#a3)"/>
+        <text class="t-lbl" x="298" y="472">P ≤ 0.2</text>
+        <rect class="bx-ok" x="40" y="490" width="160" height="40" rx="8"/>
+        <text class="t-title" x="120" y="515" text-anchor="middle">정답 ○</text>
+        <rect class="bx-wrong" x="220" y="490" width="140" height="40" rx="8"/>
+        <text class="t-title" x="290" y="515" text-anchor="middle">오답 /</text>
+
+        <text class="t-lbl" x="400" y="492">등록오답(한양)은 4, 5번 규칙에서 빠져 그대로 오답</text>
+        <text class="t-lbl" x="400" y="512">AI가 못 읽은 칸은 처음부터 선생님 확인</text>
+        <text class="t-lbl" x="400" y="532">6, 7번은 웹페이지 체크 상자로 끄고 켬</text>
+      </svg>
+      <figcaption>규칙이 확률보다 먼저입니다. "신라대장경"처럼 그럴듯한 오답은 어느 규칙에도 걸리지 않고 확률이 낮아 자동 오답이 되고, 학생 오타인지 글씨 문제인지 가릴 수 없는 답만 선생님에게 갑니다. 이 순서와 문구는 노트북 3-3절과 같습니다.</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>신경망을 정하는 방법</h2>
+    <p>웹페이지의 "정답표, 명렬표, 신경망 바꾸기"에 무엇을 올리느냐에 따라 채점에 쓰는 신경망이 달라집니다. 노트북 5-2절 서버는 이 파일을 받기만 하고 쓰지 않았는데, 독립 서버는 웹페이지 안내문대로 처리합니다.</p>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>올린 것</th><th>채점에 쓰는 것</th><th>웹페이지 표시</th></tr></thead>
+        <tbody>
+          <tr><td>없음</td><td>고른 과목의 정답표, 명렬표, 서버를 켤 때 학습한 신경망</td><td>이 정답표로 학습한 신경망</td></tr>
+          <tr><td>정답표</td><td>올린 정답표로 그 자리에서 다시 학습 (1초 안팎)</td><td>이 정답표로 학습한 신경망</td></tr>
+          <tr><td>명렬표만</td><td>과목 정답표와 신경망 + 올린 명렬표</td><td>과목 신경망 그대로</td></tr>
+          <tr><td>grader.json</td><td>노트북 3-7에서 내보낸 신경망. 정답표 지문이 다르면 경고</td><td>노트북에서 학습해 올린 신경망</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <h2>노트북과 서버 파일</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>노트북</th><th>서버 파일</th><th>달라진 점</th></tr></thead>
+        <tbody>
+          <tr><td>1-3, 1-4 파일 올리기, 정답표 확인</td><td><code>grader/tables.py</code></td><td>같은 규칙 (엑셀 시트, 열 이름 별칭)</td></tr>
+          <tr><td>1-4 정규화, 혼동쌍</td><td><code>grader/answer_key.py</code>, <code>hangul.py</code></td><td>같음</td></tr>
+          <tr><td>1-5 특징 8개</td><td><code>grader/features.py</code></td><td>같음</td></tr>
+          <tr><td>2단계 학습 데이터</td><td><code>grader/simulate.py</code></td><td>같은 시드면 같은 데이터. 과목마다 난수를 따로 씀</td></tr>
+          <tr><td>3-1 신경망 학습</td><td><code>grader/trainer.py</code></td><td>Keras 대신 numpy로 같은 방식. 서버에 TensorFlow가 필요 없음</td></tr>
+          <tr><td>3-3 판정 규칙</td><td><code>grader/judge.py</code></td><td>같음</td></tr>
+          <tr><td>3-7 grader.json</td><td><code>grader/model.py</code></td><td>같은 형식, 같은 정답표 지문</td></tr>
+          <tr><td>4-1, 4-2 답안지, 정렬, 칸 자르기</td><td><code>vision/pages.py</code>, <code>layout.py</code></td><td>ZIP 크기, PDF 쪽수 상한 추가</td></tr>
+          <tr><td>4-3, 4-4 AI 읽기</td><td><code>vision/reader.py</code></td><td>한 장 모아 읽기만 옮김 (칸마다 읽기, 모델 자동 고르기는 제외)</td></tr>
+          <tr><td>4-5, 4-6 학생 식별, 채점</td><td><code>grader/identify.py</code>, <code>pipeline.py</code></td><td>같음</td></tr>
+          <tr><td>4-8 빨간펜</td><td><code>vision/redpen.py</code></td><td>같음 (나눔펜 글꼴 포함)</td></tr>
+          <tr><td>5-2, 5-3 노트북 API, 서버 켜기</td><td><code>api/demo.py</code>, <code>demo/</code></td><td>Colab 없이 실행, Docker 이미지, 전역 변수 대신 과목별 객체</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <h2>지금 상태</h2>
+    <div class="status">
+      <div class="chip"><b>노트북과 같은 판정</b><span>노트북 셀을 직접 실행해 대조: 시뮬레이션 15,000행, 실제 답안 470칸 일치</span></div>
+      <div class="chip"><b>테스트 64개 통과</b><span>예시 답안지 사진 38장으로 멘티 설명 파일의 의도대로 판정되는지, 읽기 오류와 동시 읽기가 의도대로 도는지 확인</span></div>
+      <div class="chip"><b>화면과 배포 환경 확인</b><span>브라우저에서 채점과 선생님 판정, Docker 리눅스 컨테이너에서 실행</span></div>
+      <div class="chip"><b>Gemini 실제 읽기 확인</b><span>직접 쓴 답안지에서 지운 자국, 칸 밖 글씨, 이름 불일치("김민조")를 선생님 확인으로 보냄</span></div>
+      <div class="chip"><b>AI 읽기 거절 처리</b><span>크레딧 없음(402), 잘못된 키, 없는 모델은 기다리지 않고 바로 선생님 확인, 원인을 화면에 표시</span></div>
+      <div class="chip warn"><b>읽기 속도 개선 (측정 전)</b><span>처음 두 번을 동시에 보내 한 장 약 23초에서 절반 가까이로 줄어들 것으로 예상. 예시 답안지 미리 읽기는 4장씩 동시에</span></div>
+      <div class="chip warn"><b>알려진 차이 1칸</b><span>과학 3번 "반응중화"가 순서 바뀜으로 잡히지 않음 (노트북과 같은 동작)</span></div>
+    </div>
+  </section>
+</main>
+</body>
+</html>
