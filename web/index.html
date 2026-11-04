@@ -8,6 +8,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;500;700&family=Nanum+Pen+Script&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <style>
   :root {
     --paper: #fcfdfe; --rule: #d9e4f1; --ink: #23324a; --muted: #66768c; --line: #c7d3e2;
@@ -137,6 +138,20 @@
     .pane, .tabs, .boxes, .gallery, .charts, .tablewrap, .legend, .warn, .reading { margin-left: 0; }
   }
   @media (prefers-reduced-motion: reduce) { h1 .circled ellipse { animation: none; stroke-dashoffset: 0; } .track i { transition: none; } }
+  /* 카메라 자동 채점 */
+  #camView { position: fixed; inset: 0; background: #0d1420; color: #fff; z-index: 20; display: none; flex-direction: column; }
+  #camView.on { display: flex; }
+  #camView .bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: calc(10px + env(safe-area-inset-top, 0px)) 12px 10px; }
+  #camView .bar b { font-size: 17px; margin-right: auto; }
+  #camView .bar input { width: 130px; }
+  #camView .btn.light { background: #fff; color: var(--ink); padding: 8px 14px; }
+  #camCanvas { flex: 1; width: 100%; min-height: 0; display: block; }
+  #camStatus { margin: 0; padding: 8px 14px; font-size: 15px; min-height: 2.6em; }
+  #camList { margin: 0; max-height: 26vh; overflow: auto; padding: 0 14px calc(12px + env(safe-area-inset-bottom, 0px)) 34px; font-size: 14px; line-height: 1.7; }
+  #camList li { cursor: pointer; }
+  #camVideo { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+  #qrBox { display: flex; gap: 10px; align-items: center; margin: 8px 4px 0; font-size: 13px; color: var(--muted); }
+  #qr img, #qr canvas { display: block; background: #fff; padding: 4px; border: 1px solid var(--line); }
 </style>
 </head>
 <body>
@@ -147,8 +162,8 @@
         <span class="period">시연</span><span class="year">2026학년도 AI:ON</span>
         <h1>손글씨 <span class="circled">채점<svg viewBox="0 0 100 50" preserveAspectRatio="none" aria-hidden="true"><ellipse cx="50" cy="25" rx="47" ry="21" transform="rotate(-3 50 25)"/></svg></span> AI</h1>
       </div>
-      <div class="scorebox" aria-label="오늘 새로 읽은 답안지 수">
-        <b>오늘 읽은 답안지</b>
+      <div class="scorebox" aria-label="오늘 채점한 답안지 수">
+        <b id="todayLabel">오늘 채점한 답안지</b>
         <span id="todayCount">–</span>
         <small id="todayLimit">하루 최대 –장</small>
       </div>
@@ -165,6 +180,7 @@
     <p>※ 답안지 한 장은 30초 안에 채점합니다. 그 안에 읽지 못한 칸은 선생님 확인으로 넘깁니다.</p>
   </div>
   <p class="server" id="serverInfo">채점 서버에 연결하는 중…</p>
+  <div id="qrBox" class="hidden"><div id="qr"></div><span>휴대폰 카메라로 비추면 이 페이지가 열려요.<br>휴대폰에서 "카메라로 자동 채점"을 눌러 시험지를 비춰 보세요.</span></div>
   <div id="apiRow">
     <input id="apiInput" aria-label="채점 서버 주소" placeholder="채점 서버 주소 (예: https://xxxx.trycloudflare.com)" style="flex:1;min-width:260px">
     <button class="btn" id="apiSave">서버 연결</button>
@@ -190,7 +206,7 @@
     <div class="pane hidden" id="paneUpload">
       <p class="hint">시험지 네 모서리의 검은 사각형이 모두 보이게, 평평한 곳에서 그림자 없이 찍어 주세요. 사진, 아이폰 HEIC, 여러 쪽 PDF, ZIP 모두 됩니다.</p>
       <div class="actions" style="margin-top:0">
-        <label class="file">📷 카메라로 찍기<input type="file" id="camera" accept="image/*" capture="environment"></label>
+        <button class="btn" type="button" id="liveCam">📸 카메라로 자동 채점</button>
         <label class="file">📁 파일 고르기<input type="file" id="files" multiple accept="image/*,.heic,.heif,.pdf,.zip"></label>
         <span class="hint" id="fileNames" style="margin:0">고른 파일 없음</span>
       </div>
@@ -264,6 +280,18 @@
   </div>
 </div>
 <div id="lightbox"><img alt=""></div>
+<div id="camView" role="dialog" aria-label="카메라 자동 채점">
+  <div class="bar">
+    <b>카메라 자동 채점 <span id="camSubject" style="font-weight:400;font-size:14px"></span></b>
+    <input id="camCode" aria-label="시연용 접근 코드" placeholder="접근 코드">
+    <button class="btn light" type="button" id="camShot">직접 찍기</button>
+    <button class="btn light" type="button" id="camClose">닫기</button>
+  </div>
+  <canvas id="camCanvas"></canvas>
+  <p id="camStatus" aria-live="polite">카메라를 켜는 중</p>
+  <ol id="camList"></ol>
+  <video id="camVideo" playsinline muted autoplay></video>
+</div>
 <script>
 // ── 채점 서버 주소 ─────────────────────────────────────────────
 // 이 페이지를 서버와 따로 올렸다면(Vercel, GitHub Pages 등) DEFAULT_API에 서버 주소를 적거나,
@@ -296,8 +324,16 @@ let selected = new Set(), charts = [], SUBJECT = '', CURRENT = null;
 async function loadConfig() {
   try {
     const c = await (await fetch(api('/v1/config'))).json();
-    $('todayCount').textContent = c.used_today;
-    $('todayLimit').textContent = `하루 최대 ${c.daily_limit}장`;
+    window.CONFIG = c;
+    if (c.graded_today !== undefined) {   // 서버가 오늘 채점한 답안지 수를 알려 주면 그걸, 아니면 새로 올린 사진 수
+      $('todayLabel').textContent = '오늘 채점한 답안지';
+      $('todayCount').textContent = `${c.graded_today}장`;
+      $('todayLimit').textContent = `새로 올린 사진 ${c.used_today} / ${c.daily_limit}장`;
+    } else {
+      $('todayLabel').textContent = '오늘 새로 올린 사진';
+      $('todayCount').textContent = `${c.used_today}장`;
+      $('todayLimit').textContent = `하루 최대 ${c.daily_limit}장`;
+    }
     $('serverInfo').classList.remove('bad');
     $('serverInfo').textContent = (c.live_reading ? `AI 읽기 모델: ${c.vision_model}` : 'AI 읽기 키가 없어, 미리 읽어 둔 예시 답안지만 채점할 수 있습니다')
       + (API ? ` (서버 ${API})` : '');
@@ -350,10 +386,10 @@ $('selectAll').onclick = () => document.querySelectorAll('.sample').forEach((el)
   selected.add(el.dataset.id); el.classList.add('on'); el.setAttribute('aria-checked', 'true');
 });
 const showNames = () => {
-  const names = [...$('camera').files, ...$('files').files].map((f) => f.name);
+  const names = [...$('files').files].map((f) => f.name);
   $('fileNames').textContent = names.length ? names.join(', ') : '고른 파일 없음';
 };
-$('camera').onchange = showNames; $('files').onchange = showNames;
+$('files').onchange = showNames;
 $('tables').onchange = () => $('tableNames').textContent = [...$('tables').files].map((f) => f.name).join(', ');
 $('lightbox').onclick = () => $('lightbox').style.display = 'none';
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') $('lightbox').style.display = 'none'; });
@@ -417,7 +453,7 @@ $('runSample').onclick = () => {
   run(fd, $('runSample'), selected.size);
 };
 $('runUpload').onclick = () => {
-  const files = [...$('camera').files, ...$('files').files];
+  const files = [...$('files').files];
   if (!files.length) { $('status').innerHTML = '<div class="err">답안지 사진이나 파일을 고르세요.</div>'; return; }
   const fd = new FormData();
   files.forEach((f) => fd.append('sheets', f));
@@ -541,6 +577,265 @@ function drawCharts(d) {
       scales: { x: { stacked: true, max: Math.max(...d.scores.map((x) => x.max_score)) }, y: { stacked: true, grid: { display: false } } },
       plugins: { title: title('학생별 점수') } } }));
 }
+
+
+// ── 카메라 자동 채점: 시험지 네 모서리를 화면에서 찾아, 흔들림 없이 잡히면 자동으로 찍어 채점 ──
+function detectCorners(gray, w, h, allowPartial = false) {
+  const hist = new Uint32Array(256);
+  for (let i = 0; i < gray.length; i++) hist[gray[i]]++;
+  let sum = 0; for (let t = 0; t < 256; t++) sum += t * hist[t];
+  let sumB = 0, wB = 0, best = 0, otsu = 100;
+  for (let t = 0; t < 256; t++) {
+    wB += hist[t]; if (!wB) continue;
+    const wF = gray.length - wB; if (!wF) break;
+    sumB += t * hist[t];
+    const mB = sumB / wB, mF = (sum - sumB) / wF, v = wB * wF * (mB - mF) * (mB - mF);
+    if (v > best) { best = v; otsu = t; }
+  }
+  const thr = Math.min(otsu, 110);
+  // 주변 평균(적분 영상)보다 확실히 어두우면 잉크로 봄 → 그림자가 진 사진에서도 모서리 표시를 찾음
+  const ii = new Float64Array((w + 1) * (h + 1));
+  for (let y = 0; y < h; y++) { let row = 0; for (let x = 0; x < w; x++) { row += gray[y * w + x]; ii[(y + 1) * (w + 1) + x + 1] = ii[y * (w + 1) + x + 1] + row; } }
+  const R = Math.max(4, Math.round(w / 16));
+  const dark = new Uint8Array(w * h);
+  for (let y = 0; y < h; y++) {
+    const ya = Math.max(0, y - R), yb = Math.min(h, y + R + 1);
+    for (let x = 0; x < w; x++) {
+      const xa = Math.max(0, x - R), xb = Math.min(w, x + R + 1);
+      const m = (ii[yb * (w + 1) + xb] - ii[ya * (w + 1) + xb] - ii[yb * (w + 1) + xa] + ii[ya * (w + 1) + xa]) / ((yb - ya) * (xb - xa));
+      const g = gray[y * w + x];
+      dark[y * w + x] = (g < m * 0.6 && g < Math.max(thr, 90)) ? 1 : 0;   // 주변보다 확실히 어두운 점만 (그림자·어두운 배경과 붙지 않게)
+    }
+  }
+  const seen = new Uint8Array(w * h), stack = new Int32Array(w * h);
+  const cands = [];
+  const minS = Math.max(3, w * 0.006), maxS = w * 0.08;
+  for (let s = 0; s < w * h; s++) {
+    if (seen[s] || !dark[s]) continue;
+    let top = 0; stack[top++] = s; seen[s] = 1;
+    let area = 0, sx = 0, sy = 0, x0 = w, x1 = 0, y0 = h, y1 = 0;
+    while (top) {
+      const p = stack[--top], x = p % w, y = (p / w) | 0;
+      area++; sx += x; sy += y;
+      if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y;
+      if (area > maxS * maxS * 2) continue;
+      const nb = [p - 1, p + 1, p - w, p + w];
+      for (let k = 0; k < 4; k++) {
+        const q = nb[k];
+        if (q < 0 || q >= w * h || seen[q] || !dark[q]) continue;
+        if ((k === 0 && x === 0) || (k === 1 && x === w - 1)) continue;
+        seen[q] = 1; stack[top++] = q;
+      }
+    }
+    const bw = x1 - x0 + 1, bh = y1 - y0 + 1;
+    if (x0 === 0 || y0 === 0 || x1 === w - 1 || y1 === h - 1) continue;   // 화면 끝에 걸린 어두운 부분은 제외
+    if (bw < minS || bh < minS || bw > maxS || bh > maxS) continue;
+    if (bw / bh < 0.5 || bw / bh > 2) continue;
+    if (area < 0.74 * bw * bh) continue;   // 꽉 찬 사각형만 (글자 획은 제외)
+    cands.push([sx / area, sy / area, Math.sqrt(area)]);
+  }
+  const dist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]);
+  const quad = (lu, ru, ld, rd) => [lu, ru, ld, rd];
+  const near = (left, upper, tx, ty) => cands.filter(([x, y]) => (x < w / 2) === left && (y < h / 2) === upper)
+    .sort((a, b) => Math.hypot(a[0] - tx, a[1] - ty) - Math.hypot(b[0] - tx, b[1] - ty)).slice(0, 7);
+  const A = near(true, true, 0, 0), B = near(false, true, w, 0), C = near(true, false, 0, h), D = near(false, false, w, h);
+  let bestQ = null, bestArea = 0;
+  // 한 모서리가 화면 밖이거나 가려졌을 때: 나머지 셋으로 평행사변형을 만들어 넷째를 추정
+  const add = (a, b, c) => [a[0] + b[0] - c[0], a[1] + b[1] - c[1], (a[2] + b[2] + c[2]) / 3];
+  const full = [], partial = [];
+  for (const tl of A) for (const tr of B) for (const bl of C) for (const br of D) full.push([tl, tr, bl, br]);
+  for (const tr of B) for (const bl of C) { for (const br of D) partial.push([add(tr, bl, br), tr, bl, br]); for (const tl of A) partial.push([tl, tr, bl, add(tr, bl, tl)]); }
+  for (const tl of A) for (const br of D) { for (const tr of B) partial.push([tl, tr, add(tl, br, tr), br]); for (const bl of C) partial.push([tl, add(tl, br, bl), bl, br]); }
+  const evaluate = (combos, weight) => {
+    for (const [tl, tr, bl, br] of combos) {
+    const sz = [tl[2], tr[2], bl[2], br[2]];
+    if (Math.max(...sz) > 2.0 * Math.min(...sz)) continue;          // 네 표시의 크기가 비슷해야 함
+    const top_ = dist(tl, tr), bot = dist(bl, br), lef = dist(tl, bl), rig = dist(tr, br);
+    if (top_ / bot < 0.7 || top_ / bot > 1.43 || lef / rig < 0.7 || lef / rig > 1.43) continue;
+    const ratio = (lef + rig) / (top_ + bot);                       // A4 모서리 표시: 세로/가로 ≈ 1.46
+    if (ratio < 1.1 || ratio > 1.95) continue;
+    const area = 0.5 * Math.abs((tr[0] - tl[0]) * (br[1] - tl[1]) - (br[0] - tl[0]) * (tr[1] - tl[1]))
+               + 0.5 * Math.abs((br[0] - tl[0]) * (bl[1] - tl[1]) - (bl[0] - tl[0]) * (br[1] - tl[1]));
+    const mean = sz.reduce((a, b) => a + b) / 4;
+    if (mean < Math.sqrt(area) * 0.008 || mean > Math.sqrt(area) * 0.06) continue;   // 시험지 크기에 비해 표시 크기가 알맞은지
+    if (area * weight > bestArea) { bestArea = area * weight; bestQ = quad(tl, tr, bl, br); }
+  }
+  };
+  evaluate(full, 1);
+  if (!bestQ && allowPartial) evaluate(partial, 1);   // 카메라 자동 채점은 네 모서리가 다 보일 때만 (더 확실하게)
+  if (!bestQ || bestArea < 0.12 * w * h) return null;              // 시험지가 화면의 12% 이상
+  return bestQ.map((p) => [p[0], p[1]]);
+}
+
+const cam = { stream: null, timer: null, raf: null, hist: [], state: 'look', lost: 0, changed: 0, lastSig: null, queue: Promise.resolve(), n: 0, quad: null, ready: 0 };
+const camSmall = document.createElement('canvas');
+const camSctx = camSmall.getContext('2d', { willReadFrequently: true });
+const camSay = (t) => { $('camStatus').textContent = t; };
+
+function camGray(video, W) {
+  const H = Math.round(W * video.videoHeight / video.videoWidth);
+  camSmall.width = W; camSmall.height = H;
+  camSctx.drawImage(video, 0, 0, W, H);
+  const d = camSctx.getImageData(0, 0, W, H).data, g = new Uint8Array(W * H);
+  for (let i = 0, j = 0; i < g.length; i++, j += 4) g[i] = (d[j] * 299 + d[j + 1] * 587 + d[j + 2] * 114) / 1000;
+  return { g, W, H };
+}
+function camSig(g, W, H, q) {   // 시험지 안쪽(이름·답 칸)을 원근에 맞춰 격자로 뽑은 지문: 다른 시험지로 바뀌었는지 알아보는 데 씀
+  const [tl, tr, bl, br] = q, out = new Float32Array(24 * 48);
+  let k = 0;
+  for (let j = 0; j < 48; j++) {
+    const v = 0.12 + 0.83 * j / 47;
+    for (let i = 0; i < 24; i++) {
+      const u = 0.12 + 0.62 * i / 23;
+      const x = Math.round((1 - u) * (1 - v) * tl[0] + u * (1 - v) * tr[0] + (1 - u) * v * bl[0] + u * v * br[0]);
+      const y = Math.round((1 - u) * (1 - v) * tl[1] + u * (1 - v) * tr[1] + (1 - u) * v * bl[1] + u * v * br[1]);
+      let a = 0, n = 0;
+      for (let dy = -3; dy <= 3; dy++) for (let dx = -3; dx <= 3; dx++) {
+        const yy = y + dy, xx = x + dx;
+        if (yy >= 0 && yy < H && xx >= 0 && xx < W) { a += g[yy * W + xx]; n++; }
+      }
+      out[k++] = n ? a / n : 0;
+    }
+  }
+  const m = out.reduce((a, b) => a + b, 0) / out.length;
+  for (let i = 0; i < out.length; i++) out[i] -= m;   // 밝기 변화는 빼고 비교
+  return out;
+}
+const camDiff = (a, b) => { let s = 0; for (let i = 0; i < a.length; i++) s += Math.abs(a[i] - b[i]); return s / a.length; };
+function camBeep() {
+  try {
+    const ac = new (window.AudioContext || window.webkitAudioContext)(), o = ac.createOscillator(), gn = ac.createGain();
+    o.frequency.value = 880; gn.gain.value = 0.08; o.connect(gn); gn.connect(ac.destination); o.start(); o.stop(ac.currentTime + 0.12);
+  } catch {}
+  if (navigator.vibrate) navigator.vibrate(80);
+}
+
+async function camOpen() {
+  $('camView').classList.add('on');
+  $('camCode').value = $('code').value;
+  $('camSubject').textContent = SUBJECT ? `(${SUBJECT})` : '';
+  camSay('카메라를 켜는 중');
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    camSay('이 브라우저에서는 카메라를 쓸 수 없어요. 휴대폰 크롬이나 사파리에서 https 주소로 열어 주세요.'); return;
+  }
+  try {
+    cam.stream = await navigator.mediaDevices.getUserMedia({ audio: false,
+      video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } } });
+  } catch {
+    camSay('카메라를 켜지 못했어요. 주소창 옆 자물쇠 아이콘에서 카메라 권한을 허용해 주세요.'); return;
+  }
+  const v = $('camVideo');
+  v.srcObject = cam.stream;
+  await v.play().catch(() => {});
+  Object.assign(cam, { hist: [], state: 'look', lost: 0, changed: 0, lastSig: null, quad: null, ready: 0 });
+  camDraw();
+  cam.timer = setInterval(camTick, 140);
+}
+function camClose() {
+  clearInterval(cam.timer); cancelAnimationFrame(cam.raf);
+  if (cam.stream) cam.stream.getTracks().forEach((t) => t.stop());
+  cam.stream = null;
+  $('camView').classList.remove('on');
+  if ($('results').classList.contains('on')) $('results').scrollIntoView();
+}
+function camDraw() {
+  const v = $('camVideo'), c = $('camCanvas');
+  if (v.videoWidth) {
+    const r = c.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
+    if (c.width !== Math.round(r.width * dpr) || c.height !== Math.round(r.height * dpr)) { c.width = Math.round(r.width * dpr); c.height = Math.round(r.height * dpr); }
+    const ctx = c.getContext('2d'), k = Math.min(c.width / v.videoWidth, c.height / v.videoHeight);
+    const dw = v.videoWidth * k, dh = v.videoHeight * k, ox = (c.width - dw) / 2, oy = (c.height - dh) / 2;
+    ctx.fillStyle = '#0d1420'; ctx.fillRect(0, 0, c.width, c.height);
+    ctx.drawImage(v, ox, oy, dw, dh);
+    if (cam.quad && cam.state === 'look') {
+      const P = cam.quad.map(([x, y]) => [ox + x * dw, oy + y * dh]);
+      ctx.lineWidth = 4 * dpr; ctx.strokeStyle = cam.ready >= 1 ? '#2f9e44' : '#ffd84d';
+      ctx.beginPath(); [0, 1, 3, 2].forEach((i, n) => (n ? ctx.lineTo(P[i][0], P[i][1]) : ctx.moveTo(P[i][0], P[i][1]))); ctx.closePath(); ctx.stroke();
+      ctx.fillStyle = '#d7263d';
+      P.forEach(([x, y]) => { ctx.beginPath(); ctx.arc(x, y, 7 * dpr, 0, 7); ctx.fill(); });
+      ctx.fillStyle = 'rgba(255,255,255,.25)'; ctx.fillRect(ox, oy + dh - 8 * dpr, dw, 8 * dpr);
+      ctx.fillStyle = '#2f9e44'; ctx.fillRect(ox, oy + dh - 8 * dpr, dw * Math.min(1, cam.ready), 8 * dpr);
+    }
+  }
+  cam.raf = requestAnimationFrame(camDraw);
+}
+const CAM_STABLE = 7;   // 0.14초 × 7 ≈ 1초 동안 흔들림 없이 잡히면 찍음
+function camTick() {
+  const v = $('camVideo');
+  if (!v.videoWidth) return;
+  const { g, W, H } = camGray(v, 480), q = detectCorners(g, W, H), sig = q ? camSig(g, W, H, q) : null;
+  cam.quad = q ? q.map(([x, y]) => [x / W, y / H]) : null;
+  if (cam.state === 'wait') {   // 방금 찍은 시험지: 치우거나 다른 시험지로 바뀔 때까지 다시 찍지 않음
+    cam.lost = q ? 0 : cam.lost + 1;
+    cam.changed = sig && cam.lastSig && camDiff(sig, cam.lastSig) > 4.5 ? cam.changed + 1 : 0;
+    if (cam.lost >= 4 || cam.changed >= 3) { cam.state = 'look'; cam.hist = []; cam.changed = 0; }
+    else { camSay('찍었어요. 다음 시험지로 바꾸면 이어서 채점해요.'); return; }
+  }
+  cam.hist.push(cam.quad); if (cam.hist.length > CAM_STABLE) cam.hist.shift();
+  if (!q) { cam.ready = 0; camSay('시험지 네 모서리의 검은 사각형이 모두 화면에 들어오게 비춰 주세요'); return; }
+  const full = cam.hist.length === CAM_STABLE && cam.hist.every(Boolean);
+  const move = full ? Math.max(...cam.hist.map((h) => Math.max(...h.map((p, i) => Math.hypot(p[0] - cam.quad[i][0], p[1] - cam.quad[i][1]))))) : 1;
+  cam.ready = full && move < 0.012 ? 1 : cam.hist.filter(Boolean).length / CAM_STABLE * 0.9;
+  if (cam.ready < 1) { camSay('찾았어요. 잠깐만 그대로 들고 계세요'); return; }
+  if (window.CONFIG && CONFIG.access_code_required && !$('camCode').value.trim()) { camSay('위 칸에 접근 코드를 먼저 입력해 주세요'); return; }
+  camShoot(sig);
+}
+function camShoot(sig) {
+  const v = $('camVideo');
+  if (!v.videoWidth) return;
+  const c = document.createElement('canvas');
+  c.width = v.videoWidth; c.height = v.videoHeight;
+  c.getContext('2d').drawImage(v, 0, 0);
+  if (!sig) { const f = camGray(v, 480), q = detectCorners(f.g, f.W, f.H); sig = q ? camSig(f.g, f.W, f.H, q) : null; }
+  cam.state = 'wait'; cam.lost = 0; cam.changed = 0; cam.lastSig = sig;
+  camBeep();
+  c.toBlob((blob) => { if (blob) camEnqueue(blob); }, 'image/jpeg', 0.92);
+}
+function camEnqueue(blob) {
+  const k = ++cam.n, li = document.createElement('li');
+  li.textContent = `${k}번째 시험지: 채점 중`;
+  li.onclick = camClose;
+  $('camList').prepend(li);
+  cam.queue = cam.queue.then(() => camGrade(blob, k, li));
+}
+async function camGrade(blob, k, li) {
+  const fd = new FormData();
+  fd.append('sheets', new File([blob], `camera_${Date.now()}.jpg`, { type: 'image/jpeg' }));
+  if (SUBJECT) fd.append('subject', SUBJECT);
+  fd.append('access_code', $('camCode').value.trim());
+  $('code').value = $('camCode').value;
+  policyForm(fd);
+  fd.append('background', 'true');
+  try {
+    const r = await fetch(api('/v1/grade/images'), { method: 'POST', body: fd });
+    let body = await readJson(r);
+    if (!r.ok) throw new Error(typeof body.detail === 'string' ? body.detail : JSON.stringify(body.detail));
+    while (body.job_id && body.status !== 'done') {
+      await sleep(1000);
+      const pr = await fetch(api(`/v1/jobs/${body.job_id}`)), job = await readJson(pr);
+      if (job.status === 'done') { body = job.result; break; }
+      if (job.status === 'error') throw new Error(job.error);
+      li.textContent = `${k}번째 시험지: ${(job.progress && job.progress.message) || '채점 중'}`;
+    }
+    const sc = (body.scores || [])[0] || {};
+    li.innerHTML = `${k}번째: <b>${esc(sc.student || '학생 확인 필요')}</b> ${sc.score ?? '-'}점` +
+      (sc.review_count ? `, 선생님 확인 ${sc.review_count}문항` : '') + ' <u>결과 보기</u>';
+    render(body, false);
+  } catch (e) {
+    li.textContent = `${k}번째: 채점하지 못함 (${e.message})`;
+  } finally { loadConfig(); }
+}
+$('liveCam').onclick = camOpen;
+$('camClose').onclick = camClose;
+$('camShot').onclick = () => camShoot(null);
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && $('camView').classList.contains('on')) camClose(); });
+(() => {   // 컴퓨터 화면이면 휴대폰으로 열 QR 코드를 보여 줌
+  if (!window.QRCode || !location.protocol.startsWith('http') || !matchMedia('(min-width: 900px)').matches) return;
+  try {
+    new QRCode($('qr'), { text: location.href.split('#')[0], width: 92, height: 92 });
+    $('qrBox').classList.remove('hidden');
+  } catch {}
+})();
 
 loadConfig();
 loadSubjects().then(loadSamples);
